@@ -1,0 +1,6 @@
+{
+  "name": "OneDrive Video Stream & CDN Extractor",
+  "description": "Convert OneDrive & 1drv.ms video and file links into direct streaming CDN URLs, embed players, and download links using Python and Web tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
