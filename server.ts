@@ -4,6 +4,7 @@ import { execFile } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import getStreamLinkHandler from './api/getstreamlink.ts';
+import streamHandler from './api/stream.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,6 +32,11 @@ async function startServer() {
   // Dedicated Vercel & Express route: POST /api/getstreamlink or GET /api/getstreamlink
   app.all(['/api/getstreamlink', '/api/get-stream-link'], (req, res) => {
     return getStreamLinkHandler(req, res);
+  });
+
+  // Direct video stream proxy route
+  app.all('/api/stream', (req, res) => {
+    return streamHandler(req, res);
   });
 
   // API endpoint to resolve OneDrive link using Python

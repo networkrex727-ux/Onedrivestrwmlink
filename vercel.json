@@ -21,6 +21,10 @@
       "destination": "/api/getstreamlink"
     },
     {
+      "source": "/api/stream",
+      "destination": "/api/stream"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }

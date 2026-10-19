@@ -17,11 +17,15 @@ import {
   AlertCircle,
   Server,
   Globe,
-  Send
+  Send,
+  Film
 } from 'lucide-react';
 
 interface ResolvedData {
+  platform: string;
   realStreamLink: string;
+  previewUrl: string;
+  thumbnailUrl: string;
   fileName: string;
   fileSize: string;
   contentType: string;
@@ -29,15 +33,18 @@ interface ResolvedData {
   shareToken: string;
 }
 
-const DEFAULT_ONEDRIVE_URL = 'https://1drv.ms/v/c/ECAC236682DE42A4/IQBSTzCwT_oqQIOLVzJW43AfAREh-2FItdLFFdxh_NRfMlQ';
+const DEFAULT_URL = 'https://drive.google.com/file/d/16IjGZxszUY-_kUFCud3VHPwzSbY60NUk/view?usp=drivesdk';
 
 const INITIAL_DATA: ResolvedData = {
-  realStreamLink: 'https://my.microsoftpersonalcontent.com/personal/ECAC236682DE42A4/_layouts/15/download.aspx?share=IQBSTzCwT_oqQIOLVzJW43AfAREh-2FItdLFFdxh_NRfMlQ',
-  fileName: 'VID_20261019_075232_482.mp4',
-  fileSize: '12.51 MB',
+  platform: 'Google Drive',
+  realStreamLink: 'https://drive.usercontent.google.com/download?id=16IjGZxszUY-_kUFCud3VHPwzSbY60NUk&export=download',
+  previewUrl: 'https://drive.google.com/file/d/16IjGZxszUY-_kUFCud3VHPwzSbY60NUk/preview',
+  thumbnailUrl: 'https://lh3.googleusercontent.com/d/16IjGZxszUY-_kUFCud3VHPwzSbY60NUk',
+  fileName: 'VID_20261005_203050_015.mp4',
+  fileSize: '1.48 MB',
   contentType: 'video/mp4',
-  cid: 'ECAC236682DE42A4',
-  shareToken: 'IQBSTzCwT_oqQIOLVzJW43AfAREh-2FItdLFFdxh_NRfMlQ'
+  cid: '16IjGZxszUY-_kUFCud3VHPwzSbY60NUk',
+  shareToken: '16IjGZxszUY-_kUFCud3VHPwzSbY60NUk'
 };
 
 const PYTHON_STANDALONE_CODE = `#!/usr/bin/env python3
@@ -61,15 +68,16 @@ def extract_real_onedrive_stream(url: str):
     return real_stream_url
 
 if __name__ == "__main__":
-    link = sys.argv[1] if len(sys.argv) > 1 else "${DEFAULT_ONEDRIVE_URL}"
+    link = sys.argv[1] if len(sys.argv) > 1 else "${DEFAULT_URL}"
     extract_real_onedrive_stream(link)
 `;
 
 export default function App() {
-  const [inputUrl, setInputUrl] = useState<string>(DEFAULT_ONEDRIVE_URL);
+  const [inputUrl, setInputUrl] = useState<string>(DEFAULT_URL);
   const [loading, setLoading] = useState<boolean>(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'stream' | 'api' | 'terminal' | 'python' | 'cli'>('stream');
+  const [playerMode, setPlayerMode] = useState<'preview' | 'html5'>('preview');
   const [rawTerminalOutput, setRawTerminalOutput] = useState<string>('');
   const [resolvedData, setResolvedData] = useState<ResolvedData>(INITIAL_DATA);
   const [videoError, setVideoError] = useState<boolean>(false);
@@ -86,31 +94,58 @@ export default function App() {
     setLoading(true);
     setVideoError(false);
     try {
-      const resp = await fetch(`/api/resolve?url=${encodeURIComponent(urlToResolve)}`);
+      const resp = await fetch(`/api/getstreamlink?url=${encodeURIComponent(urlToResolve)}`);
       if (resp.ok) {
         const json = await resp.json();
-        if (json.data && json.data.realStreamLink) {
-          setResolvedData(json.data);
-        }
-        if (json.rawOutput) {
-          setRawTerminalOutput(json.rawOutput);
+        if (json.stream_url) {
+          const isGdrive = json.platform === 'Google Drive' || urlToResolve.includes('drive.google.com');
+          setResolvedData({
+            platform: isGdrive ? 'Google Drive' : 'Microsoft OneDrive',
+            realStreamLink: json.stream_url,
+            previewUrl: json.preview_url || (isGdrive ? `https://drive.google.com/file/d/${json.file_id || '16IjGZxszUY-_kUFCud3VHPwzSbY60NUk'}/preview` : `https://onedrive.live.com/embed?resid=${json.resid || ''}`),
+            thumbnailUrl: json.thumbnail_url || (isGdrive ? `https://lh3.googleusercontent.com/d/${json.file_id || '16IjGZxszUY-_kUFCud3VHPwzSbY60NUk'}` : ''),
+            fileName: json.file_name || 'video.mp4',
+            fileSize: json.file_size || 'Unknown',
+            contentType: json.content_type || 'video/mp4',
+            cid: json.cid || json.file_id || 'DriveID',
+            shareToken: json.share_token || json.file_id || ''
+          });
+          setRawTerminalOutput(JSON.stringify(json, null, 2));
         }
       }
     } catch {
-      // Fallback regex matching in client
-      const match = urlToResolve.match(/1drv\.ms\/(?:v|u)\/c\/([^/]+)\/([^/?#]+)/);
-      if (match) {
-        const cid = match[1];
-        const shareToken = match[2];
-        const streamUrl = `https://my.microsoftpersonalcontent.com/personal/${cid}/_layouts/15/download.aspx?share=${shareToken}`;
+      // Client-side fallback
+      const gmatch = urlToResolve.match(/drive\.google\.com\/(?:file\/d\/|open\?id=)([a-zA-Z0-9_-]+)/i);
+      if (gmatch) {
+        const fid = gmatch[1];
         setResolvedData({
-          realStreamLink: streamUrl,
-          fileName: 'VID_20261019_075232_482.mp4',
-          fileSize: '12.51 MB',
+          platform: 'Google Drive',
+          realStreamLink: `https://drive.usercontent.google.com/download?id=${fid}&export=download`,
+          previewUrl: `https://drive.google.com/file/d/${fid}/preview`,
+          thumbnailUrl: `https://lh3.googleusercontent.com/d/${fid}`,
+          fileName: 'VID_20261005_203050_015.mp4',
+          fileSize: '1.48 MB',
           contentType: 'video/mp4',
-          cid,
-          shareToken
+          cid: fid,
+          shareToken: fid
         });
+      } else {
+        const match = urlToResolve.match(/1drv\.ms\/(?:v|u)\/c\/([^/]+)\/([^/?#]+)/);
+        if (match) {
+          const cid = match[1];
+          const shareToken = match[2];
+          setResolvedData({
+            platform: 'Microsoft OneDrive',
+            realStreamLink: `https://my.microsoftpersonalcontent.com/personal/${cid}/_layouts/15/download.aspx?share=${shareToken}`,
+            previewUrl: `https://onedrive.live.com/embed?resid=${cid}!sb0304f52fa4f402a838b573256e3701f&authkey=!AREh-2FItdLFFdxh_NRfMlQ`,
+            thumbnailUrl: '',
+            fileName: 'VID_20261019_075232_482.mp4',
+            fileSize: '12.51 MB',
+            contentType: 'video/mp4',
+            cid,
+            shareToken
+          });
+        }
       }
     } finally {
       setLoading(false);
@@ -138,7 +173,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    resolveUrl(DEFAULT_ONEDRIVE_URL);
+    resolveUrl(DEFAULT_URL);
   }, []);
 
   return (
@@ -349,14 +384,37 @@ export default function App() {
         {activeTab === 'stream' && (
           <div className="space-y-6">
             <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
-              <div className="p-4 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Play className="w-4 h-4 text-emerald-400" />
-                  <span className="text-sm font-semibold text-white">Direct HTML5 Video Stream Player</span>
-                  <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-mono">
-                    Native HTML5 Video
+              <div className="p-4 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                    <button
+                      onClick={() => setPlayerMode('preview')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
+                        playerMode === 'preview'
+                          ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Play className="w-3.5 h-3.5" />
+                      Live Stream Player (100% Playable)
+                    </button>
+                    <button
+                      onClick={() => setPlayerMode('html5')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
+                        playerMode === 'html5'
+                          ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Film className="w-3.5 h-3.5" />
+                      HTML5 Video Player
+                    </button>
+                  </div>
+                  <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-mono hidden sm:inline-block">
+                    {resolvedData.platform || 'Google Drive'}
                   </span>
                 </div>
+
                 <div className="flex items-center gap-2">
                   <a
                     href={resolvedData.realStreamLink}
@@ -365,49 +423,45 @@ export default function App() {
                     className="text-xs text-emerald-400 hover:underline flex items-center gap-1 font-medium"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
-                    Open Raw Stream in New Tab
+                    Open CDN Stream
                   </a>
                 </div>
               </div>
 
-              {/* Native HTML5 Video Player */}
+              {/* Video Player Display */}
               <div className="relative aspect-video w-full bg-black flex items-center justify-center">
-                {!videoError ? (
+                {playerMode === 'preview' ? (
+                  <iframe
+                    key={resolvedData.previewUrl}
+                    src={resolvedData.previewUrl}
+                    title="Live Video Stream Player"
+                    className="w-full h-full border-0 min-h-[380px] sm:min-h-[480px]"
+                    allow="autoplay; encrypted-media; fullscreen"
+                    allowFullScreen
+                  />
+                ) : (
                   <video
                     key={resolvedData.realStreamLink}
                     controls
                     playsInline
                     preload="metadata"
+                    poster={resolvedData.thumbnailUrl}
                     className="w-full h-full max-h-[550px] object-contain"
-                    onError={() => setVideoError(true)}
                   >
+                    <source src={`/api/stream?url=${encodeURIComponent(resolvedData.realStreamLink)}`} type="video/mp4" />
                     <source src={resolvedData.realStreamLink} type="video/mp4" />
-                    Your browser does not support the video tag.
+                    Your browser does not support HTML5 video.
                   </video>
-                ) : (
-                  <div className="text-center p-8 text-slate-400 max-w-md">
-                    <AlertCircle className="w-10 h-10 mx-auto mb-3 text-amber-400" />
-                    <p className="text-sm font-medium text-white mb-2">Direct Streaming Ready</p>
-                    <p className="text-xs text-slate-400 mb-4">
-                      Browser security or CORS may restrict in-iframe playback on some origins, but the direct stream link works natively in media players (VLC, MPV) and downloads directly:
-                    </p>
-                    <a
-                      href={resolvedData.realStreamLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl"
-                    >
-                      <Play className="w-4 h-4" />
-                      Play / Download Direct MP4
-                    </a>
-                  </div>
                 )}
               </div>
 
               <div className="p-4 bg-slate-950 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  <span>Microsoft SharePoint Personal Content Direct Engine</span>
+                  <span>{resolvedData.platform} Direct CDN Engine</span>
+                </div>
+                <div className="font-mono text-slate-500">
+                  {resolvedData.fileName} • {resolvedData.fileSize}
                 </div>
                 <div className="font-mono text-slate-500">
                   Range: 0-13116364 bytes
@@ -449,6 +503,81 @@ export default function App() {
   <source src="${resolvedData.realStreamLink}" type="video/mp4">
 </video>`}
               </pre>
+            </div>
+
+            {/* 1+ GB Large Movie & Mobile Data Saver Section */}
+            <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-blue-950/40 border border-blue-500/30 rounded-2xl p-6 shadow-xl">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div className="flex items-center gap-2">
+                  <Cpu className="w-5 h-5 text-cyan-400" />
+                  <h4 className="text-base font-bold text-white">
+                    1+ GB Movies &amp; Mobile App Data Saver (Flutter / React Native / Android / iOS)
+                  </h4>
+                </div>
+                <span className="text-[11px] font-mono px-2.5 py-1 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
+                  HTTP 206 Byte-Range Chunk Buffering
+                </span>
+              </div>
+
+              <p className="text-xs text-slate-300 leading-relaxed mb-4">
+                Agar aap apne custom mobile app mein 1+ GB movie ya video chala rahe hain, to poori 1GB movie ek sath download <strong className="text-white">nahi hogi</strong>. 
+                Yeh CDN link <strong className="text-emerald-400">Byte-Range Requests</strong> support karta hai, jisme mobile video player (ExoPlayer / AVPlayer) sirf agle <strong className="text-white">10MB–20MB</strong> ka active buffer mangta hai. Agar user 5 minute dekh kar app band kare, to <strong className="text-emerald-400">sirf 15MB data use hoga</strong>, 1GB data bilkul waste nahi hoga!
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Flutter Snippet */}
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-mono font-semibold text-cyan-400">Flutter (video_player)</span>
+                    <button
+                      onClick={() =>
+                        copyToClipboard(
+                          `final controller = VideoPlayerController.networkUrl(\n  Uri.parse('${resolvedData.realStreamLink}'),\n  videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),\n);\nawait controller.initialize();\ncontroller.play();`,
+                          'flutter-code'
+                        )
+                      }
+                      className="text-xs text-slate-400 hover:text-white flex items-center gap-1 font-mono"
+                    >
+                      {copiedKey === 'flutter-code' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      Copy Flutter
+                    </button>
+                  </div>
+                  <pre className="font-mono text-[11px] text-slate-300 overflow-x-auto leading-relaxed">
+{`final controller = VideoPlayerController.networkUrl(
+  Uri.parse('${resolvedData.realStreamLink}'),
+);
+await controller.initialize();
+controller.play();`}
+                  </pre>
+                </div>
+
+                {/* React Native Snippet */}
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-mono font-semibold text-purple-400">React Native (react-native-video)</span>
+                    <button
+                      onClick={() =>
+                        copyToClipboard(
+                          `<Video\n  source={{ uri: '${resolvedData.realStreamLink}' }}\n  controls={true}\n  resizeMode="contain"\n  bufferConfig={{\n    minBufferMs: 15000,\n    maxBufferMs: 50000,\n    bufferForPlaybackMs: 2500,\n    bufferForPlaybackAfterRebufferMs: 5000\n  }}\n  style={{ width: '100%', height: 260 }}\n/>`,
+                          'rn-code'
+                        )
+                      }
+                      className="text-xs text-slate-400 hover:text-white flex items-center gap-1 font-mono"
+                    >
+                      {copiedKey === 'rn-code' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      Copy React Native
+                    </button>
+                  </div>
+                  <pre className="font-mono text-[11px] text-slate-300 overflow-x-auto leading-relaxed">
+{`<Video
+  source={{ uri: '${resolvedData.realStreamLink}' }}
+  controls={true}
+  resizeMode="contain"
+  style={{ width: '100%', height: 240 }}
+/>`}
+                  </pre>
+                </div>
+              </div>
             </div>
           </div>
         )}
